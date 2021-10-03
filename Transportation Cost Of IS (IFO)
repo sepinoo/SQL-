@@ -1,0 +1,84 @@
+
+select 
+	t.number 'IFO NO'
+,	t.TransportCostID
+,	case when DATENAME(W, t.SendingDate  ) ='Saturday' then (datepart(week, t.SendingDate))+1 else (datepart(week, t.SendingDate)) end         AS [SendWEEK]
+,	DatePart ( mm, t.SendingDate )    AS SendMONTH
+,	convert(date,t.SendingDate)'SendingDate'
+,	case when DATENAME(W, t.BillOfLadingDate  ) ='Saturday' then (datepart(week, t.BillOfLadingDate))+1 else (datepart(week, t.BillOfLadingDate)) end         AS [BillOfLadingWEEK]
+,	DatePart ( mm, t.BillOfLadingDate )    AS BillOfLadingMON3TH
+,	convert(date,t.BillOfLadingDate)'BillOfLadingDate'
+,	pl.Name 'Departure'
+,	INVSALES.Name 'Destination'
+,	dl.Title 'IFO Ref'
+,	INVSALES.WeightT  as 'Transported wieght (Ton)'
+,	convert(float,(t.[WeightCapacity] /1000))'Truck Capacity wieght(Ton)'
+,	convert(float, ti.[TransportationCostItem] /1000000 ) as 'Volume rate (M.IRR)'
+,   null 'Order Pallet'
+,	convert(float,V.VolumeCapacity) 'Truck Capacity(Pallet based)'
+,	(INVSALES.WeightT/convert(float,nullif(t.[WeightCapacity],0) /1000))*100 'Truck Occupation Percentages'
+,	null/convert(float,nullif(V.VolumeCapacity,0)) 'Pallet Occupation Percentages'
+,	(INVSALES.WeightT/convert(float, nullif(ti.[TransportationCostItem],0) /1000000 )*100) as 'Cost per Ton'
+,	ti.CounterpartStoreName  + ti.[CounterPartName] 'Customer Name'
+,	convert(float, t.[FiscalYearRef] )'Year'
+,	ti.[CostCenterDLCode] as 'DL Code'
+,	d.Title as 'DL Name'
+,	c.Number  as 'Cost Center code'
+,	c.Name as 'Cost Center Name'
+,	ti.[IFOREFDLCode]
+,	ti.[CareCrossroadSalesChannel] as 'Channel/Plant'
+
+
+
+from 
+				[USR3].[TransportCost] t		                 
+	INNER JOIN  [USR3].[TransportCostItem] ti					    on ti._masterref=t.transportCostID
+	left join	lgs3.Plant pl										on t.PlantRef=pl.PlantID
+	left join	[FIN3].[DL]  dl									    on  dl.DLID=ti.DLIFOREFRef
+	left join [FIN3].[DL]	d									 on ti.CostCenterDLCode=d.Code						
+	left join [GNR3].[CostCenter] c								 on d.ReferenceID=c.CostCenterID
+	
+	
+		
+	left join
+			/* Sales delivery*/
+			( 	SELECT 
+					iv.InventoryVoucherID,iv.CounterpartEntityRef,iv.CounterpartStoreRef,r.Name,
+					sum (cast(ISNULL(ppu.Weight * ivi.MajorUnitQuantity,0) AS float)  )/ 1000  AS WeightT
+	 
+				FROM
+					(select * from LGS3.InventoryVoucher WHERE InventoryVoucherSpecificationRef in(69)) iv	  
+					left join LGS3.InventoryVoucherItem ivi					    on  iv.InventoryVoucherID=ivi.InventoryVoucherRef
+					left join lgs3.Part  pa										on  pa.PartID=ivi.PartRef
+					left JOIN  LGS3.PartUnit ppu								on	ppu.PartID = pa.PartID and	pa.MajorUnitRef = ppu.UnitID
+					left JOIN  LGS3.PartUnit ppu2								on	ppu2.PartID = pa.PartID and ppu2.UnitID=9
+					left join GNR3.Party p										on  p.PartyID=iv.CounterpartEntityRef
+					left join sls3.Customer A									on p.PartyID=A.PartyRef
+					left JOIN sls3.CustomerAddress B							on a.customerId=b.customerRef 
+					left join gnr3.address c								    on c.AddressID=b.AddressRef
+					left join [GNR3].[RegionalDivision] R						on c.RegionalDivisionRef=R.RegionalDivisionID
+						group by  InventoryVoucherID,iv.CounterpartEntityRef,iv.CounterpartStoreRef,r.Name
+		
+				UNION ALL
+
+
+					/* Transfer remittance */
+				SELECT 
+					iv.InventoryVoucherID,iv.CounterpartEntityRef,iv.CounterpartStoreRef,s.Name,
+					sum(cast(ISNULL(ppu.Weight * ivi.MajorUnitQuantity,0) AS float)   )/ 1000  AS WeightT 
+	 
+				FROM
+					(select * from LGS3.InventoryVoucher WHERE InventoryVoucherSpecificationRef in(68)) iv
+					left join LGS3.InventoryVoucherItem ivi							 on iv.InventoryVoucherID=ivi.InventoryVoucherRef
+					left join lgs3.Part  pa											 on pa.PartID=ivi.PartRef
+					left JOIN  LGS3.PartUnit ppu									 on	ppu.PartID = pa.PartID and	pa.MajorUnitRef = ppu.UnitID
+					left JOIN  LGS3.PartUnit ppu2									 on	ppu2.PartID = pa.PartID and ppu2.UnitID=9
+					left join lgs3.Store s											 on s.StoreID=iv.CounterpartStoreRef 
+						group by  InventoryVoucherID,iv.CounterpartEntityRef,iv.CounterpartStoreRef,s.Name
+											) INVSALES				    on ti.InventoryVoucherRef=INVSALES.InventoryVoucherID 																
+
+	left join	[LGS3].[TransportationVehicle]  as v  on t.TransportationVehicleRef=V.TransportationVehicleID
+	
+	 	order by t.TransportCostID asc
+	
+
